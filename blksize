@@ -1,0 +1,142 @@
+/* ---------------------------------------------------------------- *
+ * Program    : blksize
+ * Author     : Gerard Wassink
+ * Date       : February 9, 2019
+ *
+ * Credits    : Originally written in GO,
+ *               (c) 2017 by moshix under the Apache License
+ *
+ * Function   : Calculate optimal block size for datasets
+ *              on a given DASD type and with a given lrecl
+ *              (logical record length)
+ *
+ * Invoke     : blocksize DASD LRECL
+ *     or       blocksize -H
+ *
+ * Remarks    : At this time BREXX will not accept command line
+ *              parameters, that's why the dasd and lrecl are
+ *              hard coded at the beginning of Main:
+ *
+ * ---------------------------------------------------------------- *
+ *                                           GNU LICENSE CONDITIONS
+ * ---------------------------------------------------------------- *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this program; if not, write to the Free
+ * Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * ---------------------------------------------------------------- *
+ *                               Copyright (C) 2019 Gerard Wassink
+ * ---------------------------------------------------------------- */
+
+Main:
+  Arg lineIn
+  Parse Var lineIn dasd lrecl .     /* --- Parse cmd line parms --- */
+
+  dasd  = "-h"                      /* --- To test help         --- */
+  dasd  = "3390"                    /* --- Test if it works     --- */
+  lrecl = "40"                      /* --- Test if it works     --- */
+
+                                    /* --- Asked for help?      --- */
+  If (Translate(dasd)  = "-H") Then Do
+    Call HelpInfo
+    Return 12
+  End
+
+                                    /* --- Check DASD parm      --- */
+  If (dasd = "") Then Do
+    Say "BLK205R No DASD type entered. "
+    Call HelpInfo
+    Return 12
+  End
+
+                                    /* --- Check lrecl parm     --- */
+  If (lrecl = "") Then Do
+    Say "BLK201R lrecl command line argument is not included."
+    Call HelpInfo
+    Return 12
+  End
+
+         /* formula:  BLOCKIZE = INT(half of TRKSZIE/LRECL) * LRECL */
+  track     = TrackSize(dasd)
+
+  If track > 0 Then Do              /* --- If valid DASD type   --- */
+
+                                    /* --- Calculation          --- */
+    halftrack = track / 2
+    blksize   = Trunc(halftrack / lrecl) * lrecl
+
+                                    /* --- Give back result     --- */
+    Say "BLK100I Ideal blocksize for DASD type: " || dasd || ,
+        " with LRECL: " || lrecl || " is " || blksize
+
+  End; Else Do
+
+    Say "BLK210R Unknown DASD type specified:" dasd
+    Call HelpInfo
+    Return 12
+
+  End
+
+
+  Say "BLK900I End of processing"
+
+Return 0
+
+
+
+/* ---------------------------------------------------------------- */
+/* Give us the tracksize for the given DASD               TrackSize */
+/* ---------------------------------------------------------------- */
+TrackSize:
+  Parse Arg dasd
+                                    /* --- Initialize arrays    --- */
+  dasd_tab. = 0
+  dasd_tab.1 = 2311; lrecl_tab.1 = 3625
+  dasd_tab.2 = 2314; lrecl_tab.2 = 7294
+  dasd_tab.3 = 3330; lrecl_tab.3 = 13030
+  dasd_tab.4 = 3340; lrecl_tab.4 = 8368
+  dasd_tab.5 = 3350; lrecl_tab.5 = 19069
+  dasd_tab.6 = 3375; lrecl_tab.6 = 35616
+  dasd_tab.7 = 3380; lrecl_tab.7 = 47476
+  dasd_tab.8 = 3390; lrecl_tab.8 = 56664
+  dasd_tab.9 = 9345; lrecl_tab.9 = 46456
+  dasd_tab.0 = 9;    lrecl_tab.0 = 9
+
+  rval = 0
+  Do i = 1 to dasd_tab.0            /* --- Walk thru array      --- */
+    If dasd_tab.i = dasd Then Do    /* --- Found?               --- */
+      rval = lrecl_tab.i            /* ---  make rval be lrecl  --- */
+      Leave                         /* --- Leave loop           --- */
+    End
+  End
+Return rval
+
+
+
+/* ---------------------------------------------------------------- */
+/* Give the user some clues about parameters used          HelpInfo */
+/* ---------------------------------------------------------------- */
+HelpInfo:
+  Say "BLK080I Usage:"
+  Say "BLK080I   blksize dasd lrecl    for calculation"
+  Say "BLK080I   blksize -h            for info"
+  Say " "
+  Say "        -h        shows this help info"
+  Say "        dasd      indicates device type for which to calculate"
+  Say "        lrecl     indicates your logical record length"
+  Say " "
+  Say "        for possible DASD types choose one of:"
+  Say "        2311 2314 3330 3340 3350 3375 3380 3390 9345"
+  Say " "
+Return 0
