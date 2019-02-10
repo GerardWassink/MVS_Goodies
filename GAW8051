@@ -1,0 +1,959 @@
+//GAWASML JOB ,'G. WASSINK',MSGCLASS=A,NOTIFY=HERC01                    00000109
+//GAW8051 EXEC ASMFCL,PARM.ASM='LOAD,NODECK,LIST,NOXREF'                00000209
+//ASM.SYSIN  DD *                                                       00000309
+         TITLE 'GAW8051 (DE-)COMPRESSION OF RECORDS'                    00000400
+**********************************************************************  00000500
+*        GAW8051  (DE-)COMPRESS A GIVEN STRING, COMPRESSING STRINGS     00000600
+*                 OF THREE OR MORE CONSECUTIVE EQUAL CHARACTERS         00000700
+*                                                                       00000800
+*        CALL FROM PL/1: CALL GAW8051 (OPER, RC, STRING)                00000900
+*                   WHERE:  OPER  : CHAR (4)                            00001000
+*                           RC    : CHAR (2)   WHERE 00 = OK            00001100
+*                                                    02 = NOT OK        00001200
+*                                                    99 = OPER NOT OK   00001300
+*                           STRING: FIXED BIN (15) CONTAINS LENGTH      00001400
+*                                   CHAR(8192)                          00001500
+*                                                                       00001600
+*        PGMR:   GERARD A. WASSINK                                      00001700
+*                                                                       00001800
+*                                                                       00001908
+*        PARAMETER HANDLING COURTESY OF JAY MOSELEY                     00002008
+*        ORIGINALLY WRITTEN DECEMBER 2001                               00002108
+*        SEE HTTP://WWW.JAYMOSELEY.COM/HERCULES                         00002208
+*                                                                       00002308
+**********************************************************************  00002400
+*
+* ********************************************************************
+*                                               GNU LICENSE CONDITIONS
+* ********************************************************************
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License 
+* along with this program; if not, write to the Free Software 
+* Foundation, Inc., 
+* 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*
+* *********************************************************************
+*				Copyright (C) 2015 Gerard Wassink
+* *********************************************************************
+*                                                                       00002500
+* ****** SYMBOLIC NAMES FOR USED REGISTERS ******                       00002600
+*                                                                       00002700
+R1       EQU   1        PARAMETER LIST ADDRESS ON ENTRY                 00002800
+R2       EQU   2        )                                               00002900
+R3       EQU   3         )                                              00003000
+R4       EQU   4          )                                             00003100
+R5       EQU   5           ) FREE FOR ROUTINE USAGE                     00003200
+R6       EQU   6          )                                             00003300
+R7       EQU   7         )                                              00003400
+R8       EQU   8        )                                               00003500
+R9       EQU   9        BASE ADDR OPERATION / BUFFER                    00003600
+R10      EQU   10       BASE ADDR RETURN CODE                           00003700
+R11      EQU   11       BASE ADDR STRING / RECORD                       00003800
+R12      EQU   12       BASE REGISTER FOR THIS PROGRAM                  00003900
+R13      EQU   13       SAVE AREA ADDRESS                               00004000
+R14      EQU   14       RETURN ADDRESS                                  00004100
+R15      EQU   15       INITIAL VALUE FOR BASE REGISTER                 00004200
+         EJECT                                                          00004300
+* --------------------------------------------------------------------  00004400
+* MAIN LINE OPERATIONS                                MAIN LINE CODING  00004506
+* --------------------------------------------------------------------  00004600
+GAW8051  CSECT ,                                                        00004706
+         STM   R14,R12,12(R13)                                          00004800
+*                                                                       00004900
+         LR    R12,R15            ESTABLISH                             00005005
+         USING GAW8051,R12         ADDRESSABILITY                       00005100
+*                                                                       00005200
+         LA    R2,SAVEAREA        LINK                                  00005300
+         ST    R13,SAVEAREA+4      SAVEAREA                             00005405
+         ST    R2,8(,R13)           TO PREVIOUS                         00005506
+         LA    R13,SAVEAREA       ADDRESS OUR OWN                       00005600
+*                                                                       00005700
+*---------------------------------------------------------------------* 00005808
+* THREE PARAMETERS SHOULD BE PASSED FROM THE CALLER.  THE ADDRESS OF  * 00005908
+* THE LAST PARAMETER PASSED WILL HAVE ITS HIGH ORDER BIT SET ON.      * 00006008
+* IF NOT CALLED WITH THREE PARAMETERS, ISSUE MESSAGE AND ABEND.       * 00006108
+*---------------------------------------------------------------------* 00006208
+         TM    0(R1),X'80'         ONE PARAMETER PASSED?                00006308
+         BO    PERROR                IF YES, ERROR                      00006408
+         TM    4(R1),X'80'         TWO PARAMETERS PASSED?               00006508
+         BO    PERROR                IF YES, ERROR                      00006608
+         TM    8(R1),X'80'         THREE PARAMETERS PASSED?             00006708
+         BO    ALLGOOD               IF YES, CONTINUE                   00006808
+*                                                                       00006908
+PERROR   DS    0H                                                       00007008
+         WTO   'GAW8051: INSUFFICIENT PARAMETERS RECEIVED',            C00007108
+               ROUTCDE=11,DESC=7                                        00007208
+         ABEND 712,DUMP                                                 00007308
+*                                                                       00007408
+ALLGOOD  DS    0H                                                       00007508
+         LM    R9,R11,0(R1)       LOAD PARAMTER ADRESSES IN R9-R11      00007608
+         L     R9,0(,R9)          ADDRESS PRMOPER                       00007708
+         USING PRMOPER,R9                                               00007800
+         L     R10,0(,R10)        ADDRESS PRMRCOD                       00007908
+         USING PRMRCOD,R10                                              00008000
+         L     R11,0(,R11)        ADDRESS PRMRECD                       00008108
+         USING PRMRECD,R11                                              00008200
+*                                                                       00008300
+         MVC   RETCODE,=C'00'     INITIALIZE RETURN CODE                00008400
+         B     SELECT              ASSUME ALL WILL GO WELL              00008511
+*                                                                       00008600
+BACK     DS    0H                                                       00008700
+         L     R13,4(R13)         RESTORE R13                           00008800
+         LM    R14,R12,12(R13)    RESTORE CALLER'S REGISTERS            00008900
+         OI    15(R13),X'01'                                            00009005
+         LA    R15,0(0,0)         RETURN CODE ZERO                      00009105
+         BR    R14                                                      00009200
+*                                                                       00009300
+         EJECT                                                          00009400
+* --------------------------------------------------------------------  00009500
+* SELECT OPERATION                                              SELECT  00009600
+* --------------------------------------------------------------------  00009700
+SELECT   DS    0H                                                       00009800
+*                                                                       00009900
+* --- CHECK THE SPECIFIED LENGTH ---                                    00010000
+*                                                                       00010100
+         XR    R7,R7              ZERO OUT R7                           00010200
+         LH    R7,RECLEN          LOAD RECORD LENGTH                    00010300
+         C     R7,BUFMAX          GREATER THAN MAXIMUM?                 00010400
+         BNH   SEL005              NO, CONTINUE                         00010500
+*                                                                       00010600
+         MVC   RETCODE,=C'02'     NOT_OK                                00010700
+         B     BACK                AND GO BACK                          00010800
+*                                                                       00010900
+SEL005   DS    0H                                                       00011000
+*                                                                       00011100
+* --- SAVE THE CONTENTS OF THE SPECIFIED RECORD IN THE BUFFER ---       00011200
+*                                                                       00011300
+         STM   R6,R9,SELSAV       STORE REGISTERS                       00011400
+         LA    R6,BUFFER          PREPARE                               00011500
+*                                  R7 CONTAINS LENGTH                   00011600
+         LA    R8,2(R11)            AND                                 00011700
+         LR    R9,R7                 EXECUTE                            00011800
+         MVCL  R6,R8                  MOVE CHARACTERS LONG              00011900
+         LM    R6,R9,SELSAV       RESTORE REGISTERS                     00012000
+*                                                                       00012100
+* --- SELECT THE OPERATION TO PERFORM ---                               00012200
+*                                                                       00012300
+         CLC   OPERAT,=C'COMP'    COMPRESS REQUESTED?                   00012400
+         BE    COMPRESS                                                 00012500
+         CLC   OPERAT,=C'DECO'    DECOMPRESS REQUESTED?                 00012600
+         BE    DECOMP                                                   00012700
+*                                                                       00012800
+         DROP  R9                 NO USE FOR THIS BASE ANYMORE          00012900
+*                                                                       00013000
+         MVC   RETCODE,=C'99'     NEITHER, RETURN ERROR                 00013100
+         B     BACK                                                     00013200
+*                                                                       00013300
+SELSAV   DS    18F                LOCAL SAVE AREA                       00013400
+*                                                                       00013500
+         EJECT                                                          00013600
+* --------------------------------------------------------------------  00013700
+* COMPRESSION ROUTINE                                         COMPRESS  00013800
+* --------------------------------------------------------------------  00013900
+*                                                                       00014000
+* THIS ROUTINE WILL PERFORM COMPRESSION OF THREE TYPES OF FIELDS:       00014100
+*                                                                       00014200
+* 1) SPACE SUPPRESSION                                                  00014300
+* 2) REPLICATING NON-SPACE & NON-DIGIT CHARACTERS                       00014400
+* 3) CONVERTING ZONED DATA TO BCD                                       00014500
+*                                                                       00014600
+* TO BE ABLE TO PROCESS ANY RECORD, EVERY FIELD IN THE COMPRESSED       00014700
+* RECORD IS PRECEDED BY A CONTROL CODE. THIS CONTROL CODE IS ONE BYTE   00014800
+* LONG AND IS USED AS FOLLOWS:                                          00014900
+*                                                                       00015000
+* BIT: 76543210                                                         00015100
+*      CE......                                                         00015200
+*                                                                       00015300
+* BIT 7 INDICATES COMPRESSION '1': NEXT AREA CONTAINS COMPRESSED DATA   00015400
+*                             '0': NEXT AREA CONTAINS UNCOMPRESSED DATA 00015500
+*                                                                       00015600
+* BIT 6, WHEN '1', INDICATES AN EXTRA LENGTH BYTE IS PROVIDED           00015700
+*                                                                       00015800
+*                                                                       00015900
+*                                                                       00016000
+* WHEN BIT 7 IS '1', THE LAYOUT OF THE REST OF THE CONTROL CODE IS:     00016100
+*                                                                       00016200
+* BIT: 76543210                                                         00016300
+*      ..TTLLLL                                                         00016400
+*                                                                       00016500
+*   WHERE TT STANDS FOR COMPRESSION TYPE:                               00016600
+*            '10' - REPLICATE CHARACTER COMPRESSION                     00016700
+*            '01' - SPACE SUPPRESSION                                   00016800
+*            '00' - ZONED TO BCD COMPRESSION                            00016900
+*                                                                       00017000
+*     AND LLLL SPECIFIES THE LENGTH OF THE COMPRESSED AREA              00017100
+*                                                                       00017200
+*                                                                       00017300
+*                                                                       00017400
+* WHEN BIT 7 IS '0', THE LAYOUT OF THE REST OF THE CONTROL CODE         00017500
+*  IS AS FOLLOWS:                                                       00017600
+*                                                                       00017700
+*   BIT 5 TO 0 SPECIFUY THE LENGHT OF THE UN-COMPRESSED AREA            00017800
+*                                                                       00017900
+*                                                                       00018000
+* WHEN BIT 6 WAS '1', THE NEXT BYTE CONTAINS AN EXTRA 8 BITS OF         00018100
+* LENGTH INFORMATION; THE TOTAL LENGTH OF THE FIELD IS CALCULATED       00018200
+* BY MULTIPLYING THE LENGTH FORM THE FIRST CONTROL BYTE BY 256 AND      00018300
+* ADDING THE VALUE FROM THE SECOND BYTE.                                00018400
+*                                                                       00018500
+*                                                                       00018600
+* IN CASE OF COMPRESSION, WHEN THE COMPRESSION TYPE IS '10',            00018700
+* REPLICATING CHARACTERS, THE NEXT (SECOND OR THIRD) BYTE CONTAINS      00018800
+* THE REPLICATING CHARACTER                                             00018900
+*                                                                       00019000
+* --------------------------------------------------------------------  00019100
+*                                                                       00019200
+*                                                                       00019300
+*                                                                       00019400
+* --------------------------------------------------------------------  00019500
+* COMPRESSION  PROCESS:                                                 00019600
+*                                                                       00019700
+* 1) INITIALIZE POINTERS                                                00019800
+*                                                                       00019900
+* 2) FIND POINTERS TO FIRST FIELD OF EACH COMPRESSION TYPE              00020000
+*                                                                       00020100
+* 3) DETERMINE WHICH TYPE-POINTER IS SMALLEST                           00020200
+*                                                                       00020300
+* 4) WHEN APPROPRIATE, TAKE OVER THE AREA PRECEDING THE SMALLEST        00020400
+*     POINTER, INDICATING IT'S UNCOMPRESSED DATA                        00020500
+*                                                                       00020600
+* 5) PERFORM THE COMPRESSION OF THE SPECIFIED TYPE                      00020700
+*                                                                       00020800
+* 6) FIND THE NEXT AREA OF THE SAME TYPE                                00020900
+*                                                                       00021000
+* 7) IF NOT END OF RECORD, LOOP AROUND TO 3)                            00021100
+*                                                                       00021200
+* 8) GIVE BACK CONTROL TO CALLING PROGRAM                               00021300
+*                                                                       00021400
+* --------------------------------------------------------------------  00021500
+         EJECT                                                          00021600
+COMPRESS DS   0H                                                        00021700
+*                                                                       00021800
+* --- INITIALIZE VARAIBLES & REGISTERS                                  00021900
+*                                                                       00022000
+         LA    R9,BUFFER          BUFFER BASE ADDRESS                   00022100
+         LR    R7,R9              BUFFER START                          00022200
+         LH    R6,RECLEN            PLUS RECORD LENGTH                  00022300
+         AR    R7,R6                 GIVE BUFFER END + 1                00022400
+         MVI   0(R7),C' '         MOVE IN ONE SPACE PAST END            00022500
+         BCTR  R7,0               MINUS ONE EQUALS BUFFER END           00022600
+         LA    R3,BUFFER          POINTER TO BUFFER                     00022700
+         LR    R8,R3              POINTER IN BUFFER                     00022800
+         LA    R5,RECORD          POINTER TO RECORD                     00022900
+*                                                                       00023000
+         ST    R3,T1              STORE T1                              00023100
+         ST    R8,T2              STORE T2                              00023200
+         ST    R5,T3              STORE T3                              00023300
+         ST    R7,EOR             STORE EOR                             00023400
+*                                                                       00023500
+* --- FIND THE FIRST OCCURRENCE OF EACH POSSIBLE COMPRESSION TYPE ---   00023600
+*                                                                       00023700
+         BAL   R14,NEXTZON        FIND NEXT ZONED AREA                  00023800
+         BAL   R14,NEXTSPA        FIND NEXT SPACE AREA                  00023901
+         BAL   R14,NEXTREP        FIND NEXT REPLICATE AREA              00024000
+*                                                                       00024100
+CMP010   DS    0H                                                       00024200
+         CLC   NXTSPA,NXTZON      SPACES > ZONED?                       00024300
+         BH    CMP012              YES                                  00024400
+         CLC   NXTSPA,NXTREP      SPACES > REPL?                        00024500
+         BH    CMP012              YES                                  00024600
+         B     CMP100             DO SPACES                             00024700
+*                                                                       00024800
+CMP012   DS    0H                                                       00024900
+         CLC   NXTREP,NXTZON      REPL <= ZONED?                        00025000
+         BNH   CMP200              YES, DO REPL'S                       00025100
+         B     CMP300              NO, DO ZONED                         00025200
+*                                                                       00025300
+         EJECT                                                          00025400
+* --------------------------------------------------------------------  00025500
+* SPACE COMPRESSION                                             SPACES  00025600
+* --------------------------------------------------------------------  00025700
+CMP100   DS    0H                                                       00025800
+         L     R8,NXTSPA           ADDRESS OF NEXT SPACE AREA           00025900
+         BAL   R14,TAKEOVER        TAKE OVER UNCOMPRESSED DATA          00026000
+*                                                                       00026100
+         L     R3,T1               LOAD CHANGED T1                      00026200
+         L     R5,T3                AND T3                              00026300
+*                                                                       00026400
+         C     R8,EOR              PAST EOR?                            00026500
+         BH    CMP900               YES, END                            00026600
+*                                                                       00026700
+* --- DETERMINE LENGTH OF SPACE AREA WITH T2 ---                        00026800
+*                                                                       00026900
+CMP102   DS    0H                                                       00027000
+         CLI   0(R8),C' '          IS IT A SPACE?                       00027101
+         BNE   CMP105               NO, END OF SPACE AREA               00027200
+         LA    R8,1(R8)            INCREMENT T2                         00027300
+         C     R8,EOR              PAST EOR?                            00027400
+         BNH   CMP102               NO, NEXT                            00027500
+*                                                                       00027600
+* --- R8 POINTS TO EOR + 1 OR TO FIRST NON-SPACE CHARACTER ---          00027700
+*                                                                       00027800
+CMP105   DS    0H                                                       00027900
+         MVI   CONTROL,X'00'       ZERO OUT CONTROL CODE                00028000
+         LR    R4,R8               LENGTH EQUALS                        00028100
+         SR    R4,R3                AREA END -/- AREA START             00028200
+         STH   R4,ARLEN            REMEMBER AREA LENGTH                 00028300
+         C     R4,MAXL4            EXTRA LENGTH BYUTE NEEDED?           00028400
+         BNH   CMP107               NO, FITS IN FOUR BITS               00028500
+*                                                                       00028600
+* --- CREATE EXTRA LENGTH BYTE ---                                      00028700
+*                                                                       00028800
+         STC   R4,CONTROL2         STORE LENGTH IN 2ND CONTROL BYTE     00028900
+         SRL   R4,8(0)             SHIFT LENGTH TO THE RIGHT            00029000
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00029100
+         NI    CONTROL,X'0F'       ZERO OUT HIGH HALF                   00029200
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00029300
+         OI    CONTROL,EXTLEN      INDICATE EXTRA LENGTH BYTE           00029400
+         OI    CONTROL,SPACES      INDICATE SPACE COMPRESSION           00029500
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00029600
+         MVC   1(1,R5),CONTROL2    STORE CONTROL2 IN RECORD             00029700
+         LA    R5,2(,R5)           BUMP UP R5 PAST CONTROL BYTES        00029800
+         B     CMP190              END OF COMPRESSION                   00029900
+*                                                                       00030000
+CMP107   DS    0H                                                       00030100
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00030200
+         NI    CONTROL,X'0F'       ZERO OUT HIGH HALF                   00030300
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00030400
+         OI    CONTROL,SPACES      INDICATE SPACE COMPRESSION           00030500
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00030600
+         LA    R5,1(,R5)           BUMP UP R5 PAST CONTROL BYTE         00030700
+*                                                                       00030800
+CMP190   DS    0H                                                       00030900
+         LR    R3,R8               T1 = T2                              00031000
+*                                                                       00031100
+         ST    R3,T1               STORE T1                             00031200
+         ST    R8,T2               STORE T2                             00031300
+         ST    R5,T3               STORE T3                             00031400
+*                                                                       00031500
+         BAL   R14,NEXTSPA         FIND NEXT SPACE AREA                 00031601
+*                                                                       00031700
+         B     CMP900              BACK TO CALLER                       00031800
+*                                                                       00031900
+         EJECT                                                          00032000
+* --------------------------------------------------------------------  00032100
+* REPLICATE DATA COMPRESSION                                    REPL'S  00032200
+* --------------------------------------------------------------------  00032300
+CMP200   DS    0H                                                       00032400
+         L     R8,NXTREP           ADDRESS OF NEXT REPL AREA            00032500
+         BAL   R14,TAKEOVER        JUST TAKE OVER AS UNCOMPRESSED       00032600
+*                                                                       00032700
+         L     R3,T1               LOAD CHANGED T1                      00032800
+         L     R5,T3                AND T3                              00032900
+*                                                                       00033000
+         C     R8,EOR              PAST EOR?                            00033100
+         BH    CMP900               YEP, END                            00033200
+*                                                                       00033300
+* --- DETERMINE LENGTH OF REPLICATE AREA WITH T2 ---                    00033400
+*                                                                       00033500
+         MVC   CHAR,0(R8)          WHAT'S THE CHARACTER?                00033600
+         LA    R8,1(,R8)           INCREMENT R8                         00033700
+         C     R8,EOR              PAST EOR?                            00033800
+         BH    CMP205               YEP, SKIP                           00033900
+*                                                                       00034000
+CMP202   DS    0H                                                       00034100
+         CLC   CHAR,0(R8)          STILL SAME CHARACTER?                00034200
+         BNE   CMP205               NOPE, END OF REPL AREA              00034300
+         LA    R8,1(R8)            INCREMENT T2                         00034400
+         C     R8,EOR              PAST EOR?                            00034500
+         BNH   CMP202               NO, REPEAT                          00034600
+*                                                                       00034700
+CMP205   DS    0H                                                       00034800
+         MVI   CONTROL,X'00'       ZERO OUT CONTROL CODE                00034900
+         LR    R4,R8               LENGTH EQUALS                        00035000
+         SR    R4,R3                AREA END -/- AREA START             00035100
+         STH   R4,ARLEN            REMEMBER AREA LENGTH                 00035200
+         C     R4,MAXL4            EXTRA LENGTH BYTE NEEDED?            00035300
+         BNH   CMP207               NO, FITS IN FOUR BITS               00035400
+*                                                                       00035500
+* --- CREATE EXTRA LENGTH BYTE ---                                      00035600
+*                                                                       00035700
+         STC   R4,CONTROL2         STORE LENGTH IN 2ND CONTROL BYTE     00035800
+         SRL   R4,8(0)             SHIFT LENGTH TO THE RIGHT            00035900
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00036000
+         NI    CONTROL,X'0F'       ZERO OUT HIGH HALF                   00036100
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00036200
+         OI    CONTROL,EXTLEN      INDICATE EXTRA LENGTH BYTE           00036300
+         OI    CONTROL,REPLIC      INDICATE REPL CHAR COMPRESSION       00036400
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00036500
+         MVC   1(1,R5),CONTROL2    STORE CONTROL2 IN RECORD             00036600
+         MVC   2(1,R5),CHAR        STORE REPLICATING CHARACTER          00036700
+         LA    R5,3(,R5)           BUMP UP R5 PAST CONTROL BYTES        00036800
+         B     CMP290              END OF COMPRESSION                   00036900
+*                                                                       00037000
+CMP207   DS    0H                                                       00037100
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00037200
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00037300
+         OI    CONTROL,REPLIC      INDICATE REPL CHAR COMPRESSION       00037400
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00037500
+         MVC   1(1,R5),CHAR        STORE REPLICATING CHARACTER          00037600
+         LA    R5,2(,R5)           BUMP UP R5 PAST CONTROL BYTE         00037700
+*                                                                       00037800
+CMP290   DS    0H                                                       00037900
+         LR    R3,R8               T1 = T2                              00038000
+*                                                                       00038100
+         ST    R3,T1               STORE T1                             00038200
+         ST    R8,T2               STORE T2                             00038300
+         ST    R5,T3               STORE T3                             00038400
+*                                                                       00038500
+         CLC   NXTREP,NXTZON       REPL'S EQUAL ZONED?                  00038600
+         BNE   CMP292               NO, SKIP                            00038700
+         BAL   R14,NEXTZON          YES, FIND NEXT ZONED AREA           00038800
+*                                                                       00038900
+CMP292   DS    0H                                                       00039000
+         BAL   R14,NEXTREP         FIND NEXT REPL AREA                  00039101
+*                                                                       00039200
+         B     CMP900              BACK TO CALLER                       00039300
+*                                                                       00039400
+         EJECT                                                          00039500
+* --------------------------------------------------------------------  00039600
+* ZONED DATA COMPRESSION                                         ZONED  00039700
+* --------------------------------------------------------------------  00039800
+CMP300   DS    0H                                                       00039900
+         L     R8,NXTZON           ADDRESS OF NEXT ZONED AREA           00040000
+         BAL   R14,TAKEOVER        JUST TAKE OVER AS UNCOMPRESSED       00040100
+*                                                                       00040200
+         L     R3,T1               LOAD CHANGED T1                      00040300
+         L     R5,T3                AND T3                              00040400
+*                                                                       00040500
+         C     R8,EOR              PAST EOR?                            00040600
+         BH    CMP900               YEP, END                            00040700
+*                                                                       00040800
+* --- DETERMINE LENGTH OF REPLICATE AREA WITH T2 ---                    00040900
+*                                                                       00041000
+CMP302   DS    0H                                                       00041100
+         CLI   0(R8),C'0'          LESS THAN '0' ?                      00041200
+         BL    CMP305               END OF ZONED AREA                   00041300
+         CLI   0(R8),C'9'          GREATER THAN '9' ?                   00041400
+         BH    CMP305               END OF ZONED AREA                   00041500
+         LA    R8,1(R8)            INCREMENT T2                         00041600
+         C     R8,EOR              PAST EOR?                            00041700
+         BNH   CMP302               NO, REPEAT                          00041800
+*                                                                       00041900
+* --- R8 POINTS TO EOR + 1 OR TO FIRST NON-ZONED CHARACTER              00042000
+*                                                                       00042100
+CMP305   DS    0H                                                       00042200
+         MVI   CONTROL,X'00'       ZERO OUT CONTROL CODE                00042300
+         LR    R4,R8               LENGTH EQUALS                        00042400
+         SR    R4,R3                AREA END -/- AREA START             00042500
+         C     R4,MAXL4            EXTRA LENGTH BYTE NEEDED?            00042600
+         BNH   CMP307               NO, FITS IN FOUR BITS               00042700
+*                                                                       00042800
+* --- CREATE EXTRA LENGTH BYTE ---                                      00042900
+*                                                                       00043000
+         STC   R4,CONTROL2         STORE LENGTH IN 2ND CONTROL BYTE     00043100
+         SRL   R4,8(0)             SHIFT LENGTH TO THE RIGHT            00043200
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00043300
+         NI    CONTROL,X'0F'       ZERO OUT HIGH HALF                   00043400
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00043500
+         OI    CONTROL,EXTLEN      INDICATE EXTRA LENGTH BYTE           00043600
+         OI    CONTROL,ZONED       INDICATE ZONED CHAR COMPRESSION      00043700
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00043800
+         MVC   1(1,R5),CONTROL2    STORE CONTROL2 IN RECORD             00043900
+         LA    R5,2(,R5)           BUMP UP R5 PAST CONTROL BYTES        00044000
+         B     CMP310              DO COMPRESSION                       00044100
+*                                                                       00044200
+CMP307   DS    0H                                                       00044300
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00044400
+         OI    CONTROL,PACKED      INDICATIE COMPRESSION ACTIVE         00044500
+         OI    CONTROL,ZONED       INDICATE ZONED CHAR COMPRESSION      00044600
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00044700
+         LA    R5,1(,R5)           BUMP UP R5 PAST CONTROL BYTE         00044800
+*                                                                       00044900
+CMP310   DS    0H                                                       00045000
+         LR    R6,R3               WALK THROUGH WITH R6                 00045100
+*                                                                       00045200
+* --- MAKE IT BCD ---                                                   00045300
+*                                                                       00045400
+CMP320   DS    0H                                                       00045500
+*                                                                       00045600
+* --- GET FIRST HALF CHARACTER ---                                      00045700
+*                                                                       00045800
+         XR    R2,R2               ZERO OUT R2                          00045900
+         MVC   CHAR,0(R6)          GET CHAR FROM BUFFER                 00046000
+         NI    CHAR,X'0F'          THROW AWAY ZONE HALF                 00046100
+         IC    R2,CHAR             LOAD DIGIT IN R2                     00046200
+         SLL   R2,4(0)             SHIFT LEFT 4                         00046300
+         STC   R2,0(,R5)           STORE CHARACTER IN RECORD            00046400
+         LA    R5,1(,R5)           BUMP UP R5                           00046500
+*                                                                       00046600
+         LA    R6,1(,R6)           INCREMENT R6                         00046700
+         CR    R6,R8               R6 >= R8 ?                           00046800
+         BNL   CMP390               YES, SKIP                           00046900
+*                                                                       00047000
+* --- IF APPROPRIATE, GET SECOND HALF OF CHARACTER ---                  00047100
+*                                                                       00047200
+         MVC   CHAR,0(R6)          GET CHAR FROM BUFFER                 00047300
+         NI    CHAR,X'0F'          THROW AWAY ZONE HALF                 00047400
+         IC    R7,CHAR             LOAD DIGIT IN R2                     00047500
+         OR    R2,R7               OR'EM TOGETHER                       00047600
+         BCTR  R5,0                TEMP DECR R5                         00047700
+         STC   R2,0(,R5)           STORE IT AGAIN                       00047800
+         LA    R5,1(,R5)           BUMP R5 BACK UP                      00047900
+*                                                                       00048000
+         LA    R6,1(,R6)           INCREMENT R6                         00048101
+         CR    R6,R8               R6 < R8 ?                            00048200
+         BL    CMP320               TES, REPEAT                         00048300
+*                                                                       00048400
+* --- END OF ZONED COMPRESSION ---                                      00048500
+*                                                                       00048600
+CMP390   DS    0H                                                       00048700
+         LR    R3,R8               T1 = T2                              00048800
+*                                                                       00048900
+         ST    R3,T1               STORE T1                             00049000
+         ST    R8,T2               STORE T2                             00049100
+         ST    R5,T3               STORE T3                             00049200
+*                                                                       00049300
+         BAL   R14,NEXTZON          YES, FIND NEXT ZONED AREA           00049400
+*                                                                       00049500
+         B     CMP900              BACK TO CALLER                       00049600
+*                                                                       00049700
+CMP3SAV  DS    18F                 LOCAL SAVE AREA                      00049800
+         EJECT                                                          00049900
+* --------------------------------------------------------------------  00050000
+* COMPRESSION ROUTINE ENDS                                      CMP900  00050100
+* --------------------------------------------------------------------  00050200
+CMP900   DS    0H                                                       00050300
+         C     R3,EOR              PAST END ?                           00050400
+         BNH   CMP010               NO, AGAIN                           00050500
+*                                                                       00050600
+         LA    R3,RECORD           DETERMINE                            00050700
+         SR    R5,R3                NEW LENGTH                          00050800
+         STH   R5,RECLEN             AND STORE IT                       00050900
+*                                                                       00051000
+         B     BACK                BACK TO CALLER                       00051100
+*                                                                       00051200
+CMPSAV   DS    18F                 LOCAL SAVE AREA                      00051300
+         EJECT                                                          00051400
+* --------------------------------------------------------------------  00051500
+* TAKE OVER AN AREA OF UNCOMPRESSED CHARACTERS                TAKEOVER  00051600
+* --------------------------------------------------------------------  00051700
+TAKEOVER DS    0H                                                       00051800
+         STM   R14,R12,12(R13)     STORE REGISTERS                      00051900
+         ST    R13,TKOSAV+4         INCL R13                            00052000
+         LA    R13,TKOSAV          ADDRESS LOCAL SAVEAREA               00052100
+*                                                                       00052200
+         L     R3,T1               LOAD T1                              00052300
+         L     R5,T3               LOAD T3                              00052400
+*                                                                       00052500
+         CR    R3,R8               UNCOMPRESSED AREA TO PROCESS ?       00052600
+         BE    TKO900               NOPE, SKIP                          00052700
+*                                                                       00052800
+         MVI   CONTROL,X'00'       ZERO OUT CONTROL CODE                00052900
+         LR    R4,R8               LENGTH EQUALS                        00053000
+         SR    R4,R3                AREA END -/- AREA START             00053100
+         STH   R4,ARLEN            REMEMBER AREA LENGTH                 00053200
+         C     R4,MAXL6            EXTRA LENGTH BYTE NEEDED?            00053300
+         BNH   TKO050               NO, FITS IN SIX BITS                00053400
+*                                                                       00053500
+* --- CREATE EXTRA LENGTH BYTE ---                                      00053600
+*                                                                       00053700
+         STC   R4,CONTROL2         STORE LENGTH IN 2ND CONTROL BYTE     00053800
+         SRL   R4,8(0)             SHIFT LENGTH TO THE RIGHT            00053900
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00054000
+         NI    CONTROL,X'3F'       ZERO OUT HIGH 2 BITS                 00054100
+         OI    CONTROL,EXTLEN      INDICATE EXTRA LENGTH BYTE           00054200
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00054300
+         MVC   1(1,R5),CONTROL2    STORE CONTROL2 IN RECORD             00054400
+         LA    R5,2(,R5)           BUMP UP R5 PAST CONTROL BYTES        00054500
+         B     TKO100              DO COMPRESSION                       00054600
+*                                                                       00054700
+TKO050   DS    0H                                                       00054800
+         STC   R4,CONTROL          STORE LENGTH IN 1ST CONTROL BYTE     00054900
+         NI    CONTROL,X'3F'       ZERO OUT HIGH 2 BITS                 00055000
+         MVC   0(1,R5),CONTROL     STORE CONTROL IN RECORD              00055100
+         LA    R5,1(,R5)           BUMP UP R5 PAST CONTROL BYTE         00055200
+*                                                                       00055300
+TKO100   DS    0H                                                       00055400
+         STM   R6,R9,TEMPSAV       SAVE REGISTERS                       00055500
+         LR    R6,R5               PREPARE MVCL, DEST ADDRESS           00055600
+         LH    R7,ARLEN                           LOAD LENGTH           00055700
+         LR    R4,R7                               SAVE LENGTH          00055800
+         LR    R8,R3                             SOURCE ADDRESS         00055900
+         LR    R9,R7                              LOAD LENGTH           00056000
+         MVCL  R6,R8               MOVE AREA FROM BUFFER TO RECORD      00056100
+         LM    R6,R9,TEMPSAV       RESTORE REGISTERS                    00056200
+*                                                                       00056300
+         LR    R3,R8               T1 = T2                              00056400
+         LA    R5,0(R4,R5)         T3 = T3 + LENGTH                     00056500
+*                                                                       00056600
+         ST    R3,T1               STORE T1                             00056700
+         ST    R5,T3               STORE T3                             00056800
+*                                                                       00056900
+TKO900   DS    0H                                                       00057000
+         L     R13,TKOSAV+4        RESTORE R13                          00057100
+         LM    R14,R12,12(R13)     RESTORE REGISTERS                    00057200
+         BR    R14                 BACK TO CALLER                       00057300
+*                                                                       00057400
+TKOSAV   DS    18F                 LOCAL SAVE AREA                      00057500
+*                                                                       00057600
+         EJECT                                                          00057700
+* --------------------------------------------------------------------  00057800
+* FIND NEXT AREA WITH FOUR OR MORE ZONED CHARACTERS            NEXTZON  00057900
+* --------------------------------------------------------------------  00058000
+NEXTZON  DS    0H                                                       00058100
+         STM   R14,R12,12(R13)     STORE REGISTERS                      00058200
+         ST    R13,NXTZSAV+4         INCL R13                           00058300
+         LA    R13,NXTZSAV          ADDRESS LOCAL SAVEAREA              00058400
+*                                                                       00058500
+         L     R4,EOR              BUFFER END ADDRESS                   00058600
+         BCTR  R4,0                 MINUS THREE                         00058700
+         BCTR  R4,0                  EQUALS                             00058800
+         BCTR  R4,0                   LIMIT                             00058900
+*                                                                       00059000
+NZO100   DS    0H                                                       00059100
+         CLI   0(R8),C'0'          ZONED CHARACTER ?                    00059200
+         BL    NZO110               NOPE, NEXT                          00059300
+         CLI   0(R8),C'9'          ZONED CHARACTER ?                    00059400
+         BH    NZO110               NOPE, NEXT                          00059500
+*                                                                       00059600
+         CLI   1(R8),C'0'          ZONED CHARACTER ?                    00059700
+         BL    NZO110               NOPE, NEXT                          00059800
+         CLI   1(R8),C'9'          ZONED CHARACTER ?                    00059900
+         BH    NZO110               NOPE, NEXT                          00060000
+*                                                                       00060100
+         CLI   2(R8),C'0'          ZONED CHARACTER ?                    00060200
+         BL    NZO110               NOPE, NEXT                          00060300
+         CLI   2(R8),C'9'          ZONED CHARACTER ?                    00060400
+         BH    NZO110               NOPE, NEXT                          00060500
+*                                                                       00060600
+         CLI   3(R8),C'0'          ZONED CHARACTER ?                    00060700
+         BL    NZO110               NOPE, NEXT                          00060800
+         CLI   3(R8),C'9'          ZONED CHARACTER ?                    00060900
+         BH    NZO110               NOPE, NEXT                          00061000
+*                                                                       00061100
+* --- FOUR ZONED CHARACTERS FOUND ---                                   00061200
+*                                                                       00061300
+         B     NZO900              YEP, GO BACK                         00061400
+*                                                                       00061500
+NZO110   DS    0H                                                       00061600
+         LA    R8,1(R8)            INCREMENT R8                         00061700
+         CR    R8,R4               LIMIT REACHED?                       00061800
+         BNH   NZO100               NO, AGAIN                           00061900
+*                                                                       00062000
+         L     R8,EOR              POINT PAST                           00062100
+         LA    R8,1(R8)             BUFFER END                          00062200
+*                                                                       00062300
+NZO900   DS    0H                                                       00062400
+         ST    R8,NXTZON           REMEMBER NEXT ZONED AREA             00062500
+*                                                                       00062600
+         L     R13,NXTZSAV+4       RESTORE R13                          00062700
+         LM    R14,R12,12(R13)     RESTORE REGISTERS                    00062800
+         BR    R14                 BACK TO CALLER                       00062900
+*                                                                       00063000
+NXTZSAV  DS    18F                 LOCAL SAVE AREA                      00063100
+         EJECT                                                          00063200
+* --------------------------------------------------------------------  00063300
+* FIND NEXT AREA WITH TWO OR MORE SPACES                       NEXTSPA  00063400
+* --------------------------------------------------------------------  00063500
+NEXTSPA  DS    0H                                                       00063600
+         STM   R14,R12,12(R13)     STORE REGISTERS                      00063700
+         ST    R13,NXTSSAV+4         INCL R13                           00063800
+         LA    R13,NXTSSAV          ADDRESS LOCAL SAVEAREA              00063900
+*                                                                       00064000
+         L     R4,EOR              BUFFER END ADDRESS                   00064100
+         BCTR  R4,0                 MINUS 1 IS LIMIT                    00064200
+*                                                                       00064300
+NSP001   DS    0H                                                       00064400
+         CLC   0(2,R8),=C'  '      TWO SPACES ?                         00064501
+         BE    NSP800               YEP, FOUND                          00064600
+         LA    R8,1(R8)            INCREMENT R8                         00064700
+         CR    R8,R4               LIMIT REACHED ?                      00064800
+         BNH   NSP001               NOPE, REPEAT                        00064900
+*                                                                       00065000
+         L     R8,EOR               YEP, POINT PAST                     00065100
+         LA    R8,1(R8)                   BUFFER END                    00065200
+*                                                                       00065300
+NSP800   DS    0H                                                       00065400
+         ST    R8,NXTSPA           REMEMBER NEXT SPACE AREA             00065500
+*                                                                       00065600
+NSP900   DS    0H                                                       00065700
+         L     R13,NXTSSAV+4       RESTORE R13                          00065800
+         LM    R14,R12,12(R13)     RESTORE REGISTERS                    00065900
+         BR    R14                 BACK TO CALLER                       00066000
+*                                                                       00066100
+NXTSSAV  DS    18F                 LOCAL SAVE AREA                      00066200
+         EJECT                                                          00066300
+* --------------------------------------------------------------------  00066400
+* FIND NEXT AREA WITH THREE OR MORE REPLICATING CHARACTERS     NEXTREP  00066500
+* --------------------------------------------------------------------  00066600
+NEXTREP  DS    0H                                                       00066700
+         STM   R14,R12,12(R13)     STORE REGISTERS                      00066800
+         ST    R13,NXTRSAV+4         INCL R13                           00066900
+         LA    R13,NXTRSAV          ADDRESS LOCAL SAVEAREA              00067000
+*                                                                       00067100
+         L     R4,EOR              BUFFER END ADDRESS                   00067200
+         BCTR  R4,0                 MINUS 2                             00067300
+         BCTR  R4,0                  IS LIMIT                           00067400
+*                                                                       00067500
+NRP100   DS    0H                                                       00067600
+         CLI   0(R8),C' '          SPACE ?                              00067700
+         BE    NRP105               YEP, NEXT                           00067800
+*                                                                       00067900
+         CLI   0(R8),C'0'          DIGIT ?                              00068000
+         BL    NRP102               NO, PERHAPS OK                      00068100
+*                                                                       00068200
+         CLI   0(R8),C'9'          DIGIT ?                              00068300
+         BNH   NRP105               YES, NEXT                           00068400
+*                                                                       00068500
+NRP102   DS    0H                                                       00068600
+         CLC   0(1,R8),1(R8)       SAME CHARACTER ?                     00068700
+         BNE   NRP105               NOPE, NEXT                          00068800
+         CLC   1(1,R8),2(R8)       SAME CHARACTER ?                     00068900
+         BNE   NRP105               NOPE, NEXT                          00069000
+         B     NRP900               YEP, FOUND                          00069100
+*                                                                       00069200
+NRP105   DS    0H                                                       00069300
+         LA    R8,1(R8)            INCREMENT R8                         00069400
+         CR    R8,R4               LIMIT REACHED ?                      00069500
+         BNH   NRP100               NOPE, REPEAT                        00069600
+*                                                                       00069700
+         L     R8,EOR               YEP, POINT PAST                     00069800
+         LA    R8,1(R8)                   BUFFER END                    00069900
+*                                                                       00070000
+NRP900   DS    0H                                                       00070100
+         ST    R8,NXTREP           REMEMBER NEXT SPACE AREA             00070200
+*                                                                       00070300
+         L     R13,NXTRSAV+4       RESTORE R13                          00070400
+         LM    R14,R12,12(R13)     RESTORE REGISTERS                    00070500
+         BR    R14                 BACK TO CALLER                       00070600
+*                                                                       00070700
+NXTRSAV  DS    18F                 LOCAL SAVE AREA                      00070800
+         EJECT                                                          00070900
+* --------------------------------------------------------------------  00071000
+* DE-COMPRESSION ROUTINE                                        DECOMP  00071100
+* --------------------------------------------------------------------  00071200
+DECOMP   DS    0H                                                       00071300
+*                                                                       00071400
+* --- INITIALIZE REGISTERS & VARIABLES ---                              00071500
+*                                                                       00071600
+         LA    R9,BUFFER           BUFFER BASE ADDRESS                  00071700
+         LR    R7,R9               BUFFER START                         00071800
+         LH    R6,RECLEN            PLUS RECORD LENGTH                  00071900
+         AR    R7,R6                 EQUALS BUFFER END PLUS 1           00072000
+         MVI   0(R7),C' '          MOVE SPACE AFTER LAST POSITION       00072100
+         BCTR  R7,0                MINUS ONE EQUALS BUFFER END          00072200
+         ST    R7,EOR              STORE EOR                            00072300
+         LA    R8,BUFFER           POINTER IN BUFFER (T1)               00072400
+         LA    R5,RECORD           POINTER IN RECORD (T3)               00072500
+*                                                                       00072600
+* --- GET FIRST / NEXT CONTROL CODE ---                                 00072700
+*                                                                       00072800
+DEC010   DS    0H                                                       00072900
+         MVC   CONTROL,0(R8)       (T2) CONTAINS CONTROL CODE           00073000
+         MVC   CHAR,0(R8)          WORKING CHARACTER                    00073100
+         LA    R8,1(R8)            INCREMENT R8                         00073200
+         XR    R7,R7               ZERO OUT R7                          00073300
+*                                                                       00073400
+         TM    CONTROL,PACKED      IS IT A PACKED FIELD ?               00073500
+         BZ    DEC800               NO, GO TAKE OVER UNCOMPRESSED       00073600
+*                                                                       00073700
+* --- IT'S COMPRESSED, LOAD LENGTH IN R7 ---                            00073800
+*                                                                       00073900
+         NI    CHAR,LENGTH4        ZERO OUT HIGH BITS                   00074000
+         IC    R7,CHAR             INSERT LENGTH IN R7                  00074100
+*                                                                       00074200
+         TM    CONTROL,EXTLEN      EXTRA LENGTH BYTE ?                  00074300
+         BZ    DEC030               NO, R7 OK                           00074400
+*                                                                       00074500
+         SLL   R7,8(0)             SHIFT LEFT ONE BYTE                  00074600
+         IC    R7,0(R8)            R7 NOW CONTAINS LENGTH               00074700
+         LA    R8,1(R8)            INCREMENT R8                         00074800
+*                                                                       00074900
+* --- DETERMINE COMPRESSION TYPE ---                                    00075000
+*                                                                       00075100
+DEC030   DS    0H                                                       00075200
+         MVC   CHAR,CONTROL        DUPLICATE CONTROL CODE               00075300
+         NI    CHAR,TYPCOD         ISOLATE COMPRESSION TYPE             00075400
+*                                                                       00075500
+         CLI   CHAR,REPLIC         REPL DATA ?                          00075600
+         BE    DEC100               YEP, GO DO REPL                     00075700
+*                                                                       00075800
+         CLI   CHAR,SPACES         SPACE DATA ?                         00075900
+         BE    DEC200               YEP, GO DO SPACES                   00076000
+*                                                                       00076100
+         CLI   CHAR,ZONED          ZONED DATA ?                         00076200
+         BE    DEC300               YEP, GO DO ZONED                    00076300
+*                                                                       00076400
+         MVC   RETCODE,=C'02'      INDICATE ERROR                       00076500
+         B     BACK                 AND BACK TO CALLER                  00076600
+*                                                                       00076700
+* --- REPLICATE DATA DE-COMPRESSION ---                                 00076800
+*                                                                       00076900
+DEC100   DS    0H                                                       00077000
+         MVC   CHAR,0(R8)          GET CAHARACTER FROM BUFFER           00077100
+         LA    R8,1(R8)            BUMP UP R8                           00077200
+         B     DEC210                                                   00077300
+*                                                                       00077400
+* --- SPACE DECOMPRESSION ---                                           00077500
+*                                                                       00077600
+DEC200   DS    0H                                                       00077700
+         MVI   CHAR,C' '           CHARACTYER IS SPACE                  00077800
+*                                                                       00077900
+DEC210   DS    0H                                                       00078000
+         STM   R6,R9,TEMPSAV       SAVE REGISTERS                       00078100
+         LR    R6,R5               PREPARE MVCL, DEST ADDRESS           00078200
+*                                                R7 IS LENGTH           00078300
+         LR    R4,R7               SAVE LENGTH                          00078400
+*                                  R8 -> SOURCE, (IRRELEVANT)           00078500
+         XR    R9,R9               ZERO OUT SECOND LENGTH REGISTER      00078600
+         ICM   R9,8,CHAR            AND INSERT PADDING BYTE             00078700
+         MVCL  R6,R8               EXECUTE MOVE LONG                    00078800
+         LM    R6,R9,TEMPSAV       RESTORE REGISTERS                    00078900
+*                                                                       00079000
+         LA    R5,0(R4,R5)         T3 = T3 + LENGTH                     00079100
+*                                                                       00079200
+         B     DEC900              GO NEXT                              00079300
+*                                                                       00079400
+* --- ZONED DECOMPRESSION ---                                           00079500
+*                                                                       00079600
+DEC300   DS    0H                                                       00079700
+         XR    R4,R4               ZERO OUT REGISTER 4                  00079800
+*                                                                       00079900
+DEC310   DS    0H                                                       00080000
+         XR    R2,R2               ZERO OUT REGISTER 2                  00080100
+         MVC   CHAR,0(R8)          GET CHARACTER                        00080200
+         NI    CHAR,X'F0'          ISOLATE UPPER HALF                   00080300
+         IC    R2,CHAR             PUT IN R2                            00080400
+         SRL   R2,4(0)             SHIFT IT                             00080500
+         STC   R2,0(,R5)           STORE IN PLACE                       00080600
+         OI    0(R5),X'F0'         RECREATE ZONED NIBBLE                00080700
+         LA    R5,1(R5)            INCREMENT R5                         00080800
+         LA    R8,1(R8)            INCREMENT R8                         00080900
+*                                                                       00081000
+         LA    R4,1(,R4)           INCREMENT COUNTER                    00081100
+         CR    R4,R7               COUNTER >= LENGTH ?                  00081200
+         BNL   DEC390               YEP, READY                          00081300
+*                                                                       00081400
+         BCTR  R8,0                TEMPORARY DECREMENT R8               00081500
+         MVC   CHAR,0(R8)          RE-GET CHARACTER                     00081600
+         NI    CHAR,X'0F'          ISOLATE LOWER HALF NOW               00081700
+         MVC   0(1,R5),CHAR        STORE IN PLACE                       00081800
+         OI    0(R5),X'F0'         RECREATE ZONE NIBBLE                 00081900
+         LA    R5,1(,R5)           INCREMENT R5                         00082000
+         LA    R8,1(,R8)           INCREMENT R8                         00082100
+*                                                                       00082200
+         LA    R4,1(,R4)           INCREMENT COUNTER                    00082300
+         CR    R4,R7               COUNTER < LENGTH ?                   00082400
+         BL    DEC310               YEP, AGAIN                          00082500
+*                                                                       00082600
+DEC390   DS    0H                                                       00082700
+         B     DEC900              GO NEXT                              00082800
+*                                                                       00082900
+* --- TAKE OVER UNCOMPRESSED DATA ---                                   00083000
+*                                                                       00083100
+DEC800   DS    0H                                                       00083200
+*                                                                       00083300
+* --- LOAD LENGTH IN R7 ---                                             00083400
+*                                                                       00083500
+         NI    CHAR,LENGTH6        ZERO OUT HIGH BITS                   00083600
+         IC    R7,CHAR             INSERT LENGTH IN R7                  00083700
+         TM    CONTROL,EXTLEN      EXTRA LENGTH BYTE ?                  00083800
+         BZ    DEC820               NO, EXTRACT SHORT LENGTH            00083900
+*                                                                       00084000
+         SLL   R7,8(0)             SHIFT LEFT ONE BYTE                  00084100
+         IC    R7,0(R8)            R7 NOW CONTAINS LENGTH               00084200
+         LA    R8,1(R8)            BUMP UP R8                           00084300
+*                                                                       00084400
+* --- TAKE OVER UNCOMPRESSEDD AREA; MOVE 0(R7,R6),0(R8) ---             00084500
+*                                                                       00084600
+DEC820   DS    0H                                                       00084700
+         STM   R6,R9,TEMPSAV       SAVE REGISTERS                       00084800
+         LR    R6,R5               PREPARE MVCL, DEST ADDRESS           00084900
+*                                                R7 IS LENGTH           00085000
+         LR    R4,R7               SAVE LENGTH                          00085100
+*                                  R8 -> SOURCE                         00085200
+         LR    R9,R7               LOAD LENGTH                          00085300
+         MVCL  R6,R8               EXECUTE MOVE LONG                    00085400
+         LM    R6,R9,TEMPSAV       RESTORE REGISTERS                    00085500
+*                                                                       00085600
+         LA    R5,0(R4,R5)         T3 = T3 + LENGTH                     00085700
+         LA    R8,0(R4,R8)         T2 = T2 + LENGTH                     00085800
+*                                                                       00085900
+         B     DEC900                                                   00086000
+*                                                                       00086100
+* --- ARE WE READY YET ? ---                                            00086200
+*                                                                       00086300
+DEC900   DS    0H                                                       00086400
+         C     R8,EOR              READY ?                              00086500
+         BNH   DEC010               NO, PROCEED                         00086600
+*                                                                       00086700
+         LA    R4,RECORD           RECORD START                         00086800
+         SR    R5,R4               R5 EQUALS LENGTH                     00086900
+         STH   R5,RECLEN           STORE LENGTH                         00087000
+*                                                                       00087100
+         B     BACK                BACK TO CALLER                       00087200
+         EJECT                                                          00087300
+* --------------------------------------------------------------------  00087400
+*                                                      WORKING STORAGE  00087500
+* --------------------------------------------------------------------  00087600
+SAVEAREA DS    18F                 REGISTER SAVE AREA                   00087700
+TEMPSAV  DS    18F                 TEMP REGISTER SAVE AREA              00087800
+*                                                                       00087900
+ARLEN    DS    H                   LENGTH OF AREA                       00088000
+*                                                                       00088100
+CHAR     DS    CL1                 STORAGE FOR CHARACTER                00088200
+*                                                                       00088300
+CONTROL  DS    CL1                 STORAGE FOR CONTROL CODE             00088400
+PACKED   EQU   X'80'      1....... COMPRESSED INDICATOR                 00088500
+EXTLEN   EQU   X'40'      .1...... LENGTH IN NEXT BYTE IF ON            00088600
+REPLIC   EQU   X'20'      ..10.... INDICATE REPLICATING CHARS           00088700
+SPACES   EQU   X'10'      ..01.... INDICATE SPACE AREA                  00088800
+ZONED    EQU   X'00'      ..00.... INDICATE ZONED AREA                  00088900
+TYPCOD   EQU   X'30'      ..11.... COMPRESSION TYPE WHEN PACKED         00089000
+LENGTH4  EQU   X'0F'      ....1111 LENGTH BITS WHEN PACKED              00089100
+LENGTH6  EQU   X'3F'      ..111111 LENGTH BITS WHEN NOT PACKED          00089200
+*                                                                       00089300
+CONTROL2 DS    CL1                 2ND CONTROL BYTE                     00089400
+CONTROL3 DS    CL1                 3RD CONTROL BYTE                     00089500
+*                                                                       00089600
+NXTZON   DS    F                   NEXT ZONED AREA                      00089700
+NXTSPA   DS    F                   NEXT SPACE AREA                      00089800
+NXTREP   DS    F                   NEXT REPLICATE AREA                  00089900
+*                                                                       00090000
+T1       DS    F                   T1 STORAGE                           00090100
+T2       DS    F                   T2 STORAGE                           00090200
+T3       DS    F                   T3 STORAGE                           00090300
+EOR      DS    F                   EOR STORAGE                          00090400
+*                                                                       00090500
+         LTORG                                                          00090600
+*                                                                       00090700
+         DS    0F                                                       00090800
+MAXL4    DC    XL4'0000000F'       MAX LENGTH FOR FOUR BITS             00090900
+MAXL6    DC    XL4'0000003F'       MAX LENGTH FOR SIX BITS              00091000
+*                                                                       00091100
+HEX15    DC    F'15'               =X'0000000F'                         00091200
+BUFMAX   DC    F'8192'             MAXIMUM BUFFER LENGTH                00091300
+BUFFER   DS    CL8192              BUFFER STORAGE TO HOLD RECORD        00091400
+*                                                                       00091500
+         EJECT                                                          00091600
+*                                                                       00091700
+* --------------------------------------------------------------------  00091800
+* DUMMY SECTIONS                                                DSECTS  00091900
+* --------------------------------------------------------------------  00092000
+PRMOPER  DSECT                                                          00092100
+OPERAT   DS    CL4                                                      00092200
+*                                                                       00092300
+PRMRCOD  DSECT                                                          00092400
+RETCODE  DS    CL2                                                      00092500
+*                                                                       00092600
+PRMRECD  DSECT                                                          00092700
+RECLEN   DS    H                                                        00092800
+RECORD   DS    CL8192                                                   00092900
+*                                                                       00093000
+         END   GAW8051                                                  00093100
+/*                                                                      00093209
+//LKED.SYSLMOD DD DSN=HERC01.TEST.LOADLIB,DISP=OLD                      00093309
+//LKED.SYSIN DD *                                                       00093409
+  NAME GAW8051(R)                                                       00093509
+/*                                                                      00093609
+//                                                                      00093709

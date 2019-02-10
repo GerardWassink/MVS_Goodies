@@ -1,0 +1,157 @@
+//TESTPLI JOB ,'G. WASSINK',MSGCLASS=A,NOTIFY=HERC01                    00000108
+//CODECO EXEC PL1LFCG,PARM.PL1L='NOL',PARM.GO='PRINT,MAP'               00000204
+//PL1L.SYSIN DD *                                                       00000300
+ CODECO: PROCEDURE OPTIONS(MAIN);                                       00000408
+                                                                        00000504
+   DECLARE OPER   CHARACTER(4);                                         00000605
+   DECLARE RETCOD CHARACTER(2);                                         00000705
+                                                                        00000805
+   DECLARE 1 BUFFER,                                                    00000905
+             2 RECLEN    FIXED BINARY(15),                              00001007
+             2 RECORD    CHARACTER(8192);                               00001105
+                                                                        00001204
+   DECLARE SYSPRINT FILE;                                               00001304
+                                                                        00001404
+   PUT EDIT ('---=== PROGRAM STARTS ===---') (A(30))                    00001505
+    FILE(SYSPRINT);                                                     00001605
+                                                                        00001705
+   RECLEN = 88;                                                         00001808
+   RECORD = '20190201G. WASSINK          AAAAAAAAAABBBBBBBBBBCCCCCCCCCCC00001908
+DDDDDDDDDDEEEEEEEEEEFFFFFFFFFF';                                        00002008
+          /* ....+....1....+....2....+....3....+....4....+....5 */      00002108
+                                                                        00002207
+   /* ----- COMPRESS RECORD ----- */                                    00002308
+   OPER   = 'COMP';                                                     00002408
+   RETCOD = '99';                                                       00002508
+                                                                        00002608
+   PUT SKIP (3) FILE(SYSPRINT);                                         00002708
+   PUT EDIT ('---=== ORIGINAL RECORD ===---') (A(45))                   00002808
+            FILE(SYSPRINT);                                             00002908
+                                                                        00003008
+   CALL DUMPREC(RECORD,RECLEN);                                         00003108
+                                                                        00003208
+                                                                        00003308
+   PUT SKIP (5) FILE(SYSPRINT);                                         00003408
+   PUT EDIT ('---===================================---') (A(45))       00003508
+            FILE(SYSPRINT);                                             00003608
+   PUT SKIP (1) FILE(SYSPRINT);                                         00003708
+   PUT EDIT ('---=== CALLING GAW8051 TO COMPRESS ===---') (A(45))       00003808
+            FILE(SYSPRINT);                                             00003908
+   PUT SKIP (1) FILE(SYSPRINT);                                         00004008
+   PUT EDIT ('---===================================---') (A(45))       00004108
+            FILE(SYSPRINT);                                             00004208
+                                                                        00004308
+                                                                        00004408
+   CALL GAW8051(OPER,RETCOD,BUFFER);                                    00004505
+                                                                        00004605
+                                                                        00004708
+   PUT SKIP (2) FILE(SYSPRINT);                                         00004808
+   PUT EDIT (' RETURN CODE = ',RETCOD) (A(15),A(2))                     00004908
+    FILE(SYSPRINT);                                                     00005008
+                                                                        00005108
+   PUT SKIP (2) FILE(SYSPRINT);                                         00005208
+   PUT EDIT ('---=== COMPRESSED BY GAW8051: ===---') (A(45))            00005308
+            FILE(SYSPRINT);                                             00005408
+                                                                        00005508
+   CALL DUMPREC(RECORD,RECLEN);                                         00005608
+                                                                        00005705
+                                                                        00005808
+                                                                        00005908
+   /* ----- DECOMPRESS SAME RECORD ----- */                             00006008
+   OPER   = 'DECO';                                                     00006108
+   RETCOD = '99';                                                       00006208
+                                                                        00006308
+   PUT SKIP (5) FILE(SYSPRINT);                                         00006408
+   PUT EDIT ('---=====================================---') (A(45))     00006508
+            FILE(SYSPRINT);                                             00006608
+   PUT SKIP (1) FILE(SYSPRINT);                                         00006708
+   PUT EDIT ('---=== CALLING GAW8051 TO DECOMPRESS ===---') (A(45))     00006808
+            FILE(SYSPRINT);                                             00006908
+   PUT SKIP (1) FILE(SYSPRINT);                                         00007008
+   PUT EDIT ('---=====================================---') (A(45))     00007108
+            FILE(SYSPRINT);                                             00007208
+                                                                        00007308
+                                                                        00007408
+   CALL GAW8051(OPER,RETCOD,BUFFER);                                    00007508
+                                                                        00007608
+                                                                        00007708
+   PUT SKIP (2) FILE(SYSPRINT);                                         00007808
+   PUT EDIT (' RETURN CODE = ',RETCOD) (A(15),A(2))                     00007908
+    FILE(SYSPRINT);                                                     00008008
+                                                                        00008108
+   PUT SKIP (2) FILE(SYSPRINT);                                         00008208
+   PUT EDIT ('---=== DECOMPRESSED AGAIN BY GAW8051 ===---') (A(45))     00008308
+            FILE(SYSPRINT);                                             00008408
+                                                                        00008508
+   CALL DUMPREC(RECORD,RECLEN);                                         00008608
+                                                                        00008708
+   PUT SKIP (5) FILE(SYSPRINT);                                         00008808
+   PUT EDIT ('---=== PROGRAM ENDS    ===---') (A(30)) FILE(SYSPRINT);   00008905
+                                                                        00009008
+                                                                        00009108
+                                                                        00009208
+ DUMPREC: PROC(RECRD, RECL);                                            00009308
+   DECLARE RECRD       CHARACTER(8192);                                 00009408
+   DECLARE RECL        FIXED BINARY(15);                                00009508
+                                                                        00009608
+   DECLARE HEXDIGITS   CHARACTER(16);                                   00009708
+   DECLARE I, J, K     FIXED BINARY(15)      INITIAL(0);                00009808
+                                                                        00009908
+   DECLARE BYTE1       CHARACTER(1);                                    00010008
+   DECLARE BYTEVAL     BIT(8)                DEFINED BYTE1;             00010108
+                                                                        00010208
+   DECLARE BYTEHIGH    BIT(8);                                          00010308
+   DECLARE BYTEH       BIT(4)                DEFINED BYTEHIGH;          00010408
+   DECLARE BYTELOW     BIT(8);                                          00010508
+                                                                        00010608
+   DECLARE HIGHNIBBLE  CHARACTER(1);                                    00010708
+   DECLARE LOWNIBBLE   CHARACTER(1);                                    00010808
+                                                                        00010908
+   HEXDIGITS = '0123456789ABCDEF';                                      00011008
+                                                                        00011108
+   PUT SKIP (1) FILE(SYSPRINT);                                         00011208
+   PUT EDIT (' RECORD = ',RECRD)  (A(10),A(RECL))                       00011308
+    FILE(SYSPRINT);                                                     00011408
+                                                                        00011508
+   PUT SKIP (1) FILE(SYSPRINT);                                         00011608
+   PUT EDIT (' LENGTH = ',RECL) (A(10), F(7))                           00011708
+    FILE(SYSPRINT);                                                     00011808
+                                                                        00011908
+   PUT SKIP (1) FILE(SYSPRINT);                                         00012008
+   PUT EDIT (' HEXADECIMAL: ') (A(14)) FILE(SYSPRINT);                  00012108
+   PUT SKIP (1) FILE(SYSPRINT);                                         00012208
+   DO I = 1 TO RECL BY 1;                                               00012308
+      BYTE1      = SUBSTR(RECRD,I,1);                                   00012408
+      BYTEHIGH   = (BYTEVAL & '11110000'B);   /* SHIFT LEFT 4 */        00012508
+      BYTELOW    = (BYTEVAL & '00001111'B);                             00012608
+      HIGHNIBBLE = SUBSTR(HEXDIGITS,(BYTEH+1),1);                       00012708
+      LOWNIBBLE  = SUBSTR(HEXDIGITS,(BYTELOW+1),1);                     00012808
+                                                                        00012908
+      PUT EDIT (HIGHNIBBLE) (A(1)) FILE(SYSPRINT);                      00013008
+      PUT EDIT (LOWNIBBLE)  (A(1)) FILE(SYSPRINT);                      00013108
+                                                                        00013208
+      IF MOD(I,4) = 0 THEN                                              00013308
+         DO;                                                            00013408
+            PUT EDIT (' ') (A(1)) FILE(SYSPRINT);                       00013508
+         END;                                                           00013608
+                                                                        00013708
+      IF MOD(I,16) = 0 THEN                                             00013808
+         DO;                                                            00013908
+            PUT EDIT (' ') (A(1)) FILE(SYSPRINT);                       00014008
+         END;                                                           00014108
+                                                                        00014208
+      IF MOD(I,64) = 0 THEN                                             00014308
+         DO;                                                            00014408
+            PUT SKIP (1) FILE(SYSPRINT);                                00014508
+         END;                                                           00014608
+                                                                        00014708
+   END;                                                                 00014808
+                                                                        00014908
+ END DUMPREC;                                                           00015008
+                                                                        00015108
+ END CODECO;                                                            00015208
+/*                                                                      00015300
+//GO.SYSLIB DD                                                          00015402
+//          DD DSN=HERC01.TEST.LOADLIB,DISP=SHR                         00015504
+//GO.SYSPRINT DD SYSOUT=*,DCB=(RECFM=FBA,LRECL=161,BLKSIZE=16100)       00015604
+//                                                                      00015700
