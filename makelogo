@@ -1,0 +1,17 @@
+#!/bin/bash
+# Mihai Criveti: generate LOGIN splash for MVS
+# Usage: ./makelogo.sh dino > out
+#
+# Just create a text file with the text for your screen and this 
+# script will convert it to a couple of Assembler statements
+# you can embed into SYS2.CNTL(TK4-LOGO)
+logo=$1
+IFS=$'\n'
+linum=7
+for line in $(cat ${logo})
+do
+  echo "         \$SBA   (${linum},15)\n"
+  echo "         DC     C'$line'\n"
+  echo "         \$SF    (SKIP,HI)\n"
+  ((linum++))
+done
